@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>V8 SYNC</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root{
+    --bg:#0a0c0e; --panel:#15181b; --amber:#ff8a1e; --amber-dim:#7a4514;
+    --red:#e13a3a; --blue:#3a7de1; --steel:#7c838c; --cream:#ece7dd; --line:#2a2f34;
+    --v12:#8f5bff;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{ margin:0; padding:0; height:100%;
+    background:radial-gradient(ellipse at 50% 0%, #1a1d20 0%, var(--bg) 60%);
+    color:var(--cream); font-family:'JetBrains Mono', monospace; overflow-y:auto; overflow-x:hidden; user-select:none; }
+  #app{ min-height:100%; display:flex; flex-direction:column; align-items:center; padding:16px 16px 30px; gap:13px; }
+
+  .statusbar{ width:100%; max-width:560px; display:flex; justify-content:space-between; font-size:11px; letter-spacing:.12em; color:var(--steel); text-transform:uppercase; }
+  .statusbar .dot{ display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--steel); margin-right:6px; vertical-align:middle;}
+  .statusbar .dot.live{ background:#3ddc84; box-shadow:0 0 6px #3ddc84; }
+
+  .gauge-wrap{ position:relative; width:min(60vw, 280px); aspect-ratio:1/1; margin-top:2px; }
+  svg{ width:100%; height:100%; display:block; }
+  .tick{ stroke:var(--steel); stroke-width:2; opacity:.55; }
+  .tick.hot{ stroke:var(--red); opacity:.85; }
+  .needle{ transform-origin:150px 150px; filter:drop-shadow(0 0 6px rgba(255,138,30,.55)); transition:transform .1s cubic-bezier(.4,0,.2,1); }
+  .rpm-readout{ position:absolute; top:58%; left:50%; transform:translate(-50%,-50%); text-align:center; }
+  .rpm-num{ font-family:'Rajdhani', sans-serif; font-weight:700; font-size:38px; color:var(--cream); line-height:1; }
+  .rpm-label{ font-size:10px; letter-spacing:.22em; color:var(--amber); margin-top:2px; }
+  .gear-badge{ position:absolute; top:15%; left:50%; transform:translate(-50%,0); font-family:'Rajdhani', sans-serif; font-weight:700; font-size:17px; color:var(--steel); border:1px solid var(--line); border-radius:6px; padding:2px 10px; background:var(--panel); }
+
+  .telemetry{ width:100%; max-width:560px; display:flex; gap:8px; }
+  .tcell{ flex:1; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .tcell .k{ font-size:9px; color:var(--steel); letter-spacing:.13em; }
+  .tcell .v{ font-family:'Rajdhani', sans-serif; font-weight:600; font-size:18px; color:var(--cream); margin-top:2px;}
+
+  .throttle-block{ width:100%; max-width:560px; }
+  .throttle-label{ display:flex; justify-content:space-between; font-size:10px; letter-spacing:.12em; color:var(--steel); margin-bottom:6px; }
+  input[type=range]{ -webkit-appearance:none; width:100%; height:30px; background:transparent; }
+  input[type=range]::-webkit-slider-runnable-track{ height:7px; border-radius:4px; background:linear-gradient(90deg, var(--amber-dim), var(--amber) 60%, var(--red)); }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:24px; height:24px; border-radius:50%; background:var(--cream); border:3px solid var(--amber); margin-top:-8px; box-shadow:0 0 10px rgba(255,138,30,.5); }
+
+  .section-label{ width:100%; max-width:560px; font-size:10px; letter-spacing:.18em; color:var(--steel); text-transform:uppercase; margin-bottom:-4px; display:flex; justify-content:space-between; }
+  .section-label span.sub{ color:#565c62; text-transform:none; letter-spacing:0; font-size:10px; }
+
+  .segmented{ width:100%; max-width:560px; display:flex; gap:6px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:4px; transition:opacity .2s; }
+  .segmented.disabled{ opacity:.35; pointer-events:none; }
+  .seg-btn{ flex:1; text-align:center; padding:9px 4px; border-radius:7px; font-family:'Rajdhani', sans-serif; font-weight:600; font-size:13px; letter-spacing:.05em; color:var(--steel); cursor:pointer; transition:background .15s, color .15s; }
+  .seg-btn.active{ background:var(--amber); color:#1a1200; }
+  .seg-btn.active.turbo{ background:#3ab0e1; color:#031824; }
+  .seg-btn.active.super{ background:#9a6bff; color:#140833; }
+  .seg-btn.active.ship{ background:linear-gradient(90deg,#8f5bff,#3ab0e1); color:#080314; }
+
+  .controls-row{ width:100%; max-width:560px; display:flex; gap:10px; }
+  .ctrl-btn{ flex:1; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 8px; text-align:center; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+  .ctrl-btn .clabel{ font-family:'Rajdhani', sans-serif; font-weight:700; font-size:15px; letter-spacing:.05em; color:var(--steel); }
+  .ctrl-btn .csub{ font-size:9px; color:var(--steel); letter-spacing:.1em; margin-top:2px; }
+  .ctrl-btn.on{ border-color:var(--red); box-shadow:0 0 16px rgba(225,58,58,.35); }
+  .ctrl-btn.on .clabel{ color:var(--red); }
+  .ctrl-btn.pops-on{ border-color:var(--amber); box-shadow:0 0 16px rgba(255,138,30,.3); }
+  .ctrl-btn.pops-on .clabel{ color:var(--amber); }
+
+  .lightbar{ display:flex; gap:3px; justify-content:center; margin-top:2px; height:6px; width:100%; max-width:560px; }
+  .lightbar .l{ flex:1; max-width:26px; height:6px; border-radius:2px; background:#222; }
+  .lightbar.active .l:nth-child(odd){ background:var(--red); box-shadow:0 0 8px var(--red); animation:blinkA .35s infinite alternate; }
+  .lightbar.active .l:nth-child(even){ background:var(--blue); box-shadow:0 0 8px var(--blue); animation:blinkB .35s infinite alternate; }
+  @keyframes blinkA{ from{opacity:1;} to{opacity:.25;} }
+  @keyframes blinkB{ from{opacity:.25;} to{opacity:1;} }
+
+  .bottom-row{ width:100%; max-width:560px; display:flex; align-items:center; justify-content:center; gap:22px; margin-top:4px; }
+  .ignition-wrap, .rev-wrap{ display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .ignition, .rev-btn{ width:92px; height:92px; border-radius:50%; border:3px solid #33383d; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.6); cursor:pointer; transition:box-shadow .1s, transform .06s, border-color .1s; }
+  .ignition{ background:radial-gradient(circle at 35% 30%, #2a2e32, #101214 70%); }
+  .ignition:active{ transform:scale(.96); }
+  .ignition svg{ width:32px; height:32px; }
+  .ignition.on{ border-color:var(--amber); box-shadow:0 0 0 6px rgba(255,138,30,.12), 0 0 24px rgba(255,138,30,.5); }
+  .ignition-caption, .rev-caption{ font-size:10px; letter-spacing:.16em; color:var(--steel); text-transform:uppercase; }
+  .ignition-caption.on{ color:var(--amber); }
+  .rev-btn{ background:radial-gradient(circle at 35% 30%, #241416, #100a0a 70%); }
+  .rev-btn:active, .rev-btn.pressed{ transform:scale(.94); border-color:var(--red); box-shadow:0 0 0 6px rgba(225,58,58,.15), 0 0 26px rgba(225,58,58,.55); }
+  .rev-btn svg{ width:30px; height:30px; }
+
+  .hint{ font-size:9.5px; color:#4b5157; text-align:center; max-width:400px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="statusbar">
+    <div><span class="dot" id="gpsDot"></span><span id="gpsText">GPS: buscando…</span></div>
+    <div>V8 SYNC</div>
+  </div>
+
+  <div class="gauge-wrap">
+    <svg viewBox="0 0 300 300">
+      <circle cx="150" cy="150" r="128" fill="none" stroke="#202427" stroke-width="10"/>
+      <g id="ticks"></g>
+      <g class="needle" id="needle">
+        <line x1="150" y1="150" x2="150" y2="40" stroke="var(--amber)" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="150" cy="150" r="9" fill="#161819" stroke="var(--amber)" stroke-width="3"/>
+      </g>
+    </svg>
+    <div class="gear-badge" id="gearBadge">N</div>
+    <div class="rpm-readout">
+      <div class="rpm-num" id="rpmNum">0</div>
+      <div class="rpm-label" id="rpmLabel">RPM x1000</div>
+    </div>
+  </div>
+
+  <div class="telemetry">
+    <div class="tcell"><div class="k">VELOCIDAD</div><div class="v" id="speedVal">0 <span style="font-size:11px;color:var(--steel)">km/h</span></div></div>
+    <div class="tcell"><div class="k">ACELERACIÓN</div><div class="v" id="accelVal">0.0</div></div>
+    <div class="tcell"><div class="k">MODO</div><div class="v" id="modeVal" style="font-size:13px;">MANUAL</div></div>
+  </div>
+
+  <div class="throttle-block">
+    <div class="throttle-label"><span>ACELERADOR DE PRUEBA (simula GPS)</span><span id="throttlePct">0%</span></div>
+    <input type="range" id="throttle" min="0" max="100" value="0">
+  </div>
+
+  <div class="section-label"><span>MOTOR</span><span class="sub" id="engineSub">V8 · TIPO CAMARO</span></div>
+  <div class="segmented" id="engineSeg">
+    <div class="seg-btn active" data-eng="v8">V8</div>
+    <div class="seg-btn" data-eng="v6">V6</div>
+    <div class="seg-btn" data-eng="v12">V12</div>
+    <div class="seg-btn" data-eng="ship">NAVE</div>
+  </div>
+
+  <div class="section-label"><span>INDUCCIÓN</span></div>
+  <div class="segmented" id="inductionSeg">
+    <div class="seg-btn active" data-mode="na">ASPIRADO</div>
+    <div class="seg-btn" data-mode="turbo">TURBO</div>
+    <div class="seg-btn" data-mode="super">SUPERCARGADOR</div>
+  </div>
+
+  <div class="section-label"><span>SONIDOS ADICIONALES</span></div>
+  <div class="controls-row">
+    <div class="ctrl-btn" id="sirenBtn">
+      <div class="clabel" id="sirenLabel">SIRENA</div>
+      <div class="csub" id="sirenSub">TOCAR PARA ACTIVAR</div>
+    </div>
+    <div class="ctrl-btn" id="popsBtn">
+      <div class="clabel">POPS &amp; BANGS</div>
+      <div class="csub" id="popsSub">DESACTIVADO</div>
+    </div>
+  </div>
+  <div class="lightbar" id="lightbar">
+    <div class="l"></div><div class="l"></div><div class="l"></div><div class="l"></div><div class="l"></div><div class="l"></div>
+  </div>
+
+  <div class="bottom-row">
+    <div class="rev-wrap">
+      <div class="rev-btn" id="revBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--steel)" stroke-width="2">
+          <path d="M4 15 L10 9 L14 13 L20 5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M14 5 L20 5 L20 11" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="rev-caption">ACELERÓN</div>
+    </div>
+
+    <div class="ignition-wrap">
+      <div class="ignition" id="ignitionBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--steel)" stroke-width="2">
+          <path d="M12 2v10" stroke-linecap="round"/>
+          <path d="M6 6a8 8 0 1 0 12 0" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="ignition-caption" id="ignitionCaption">ENCENDER MOTOR</div>
+    </div>
+  </div>
+
+  <div class="hint">Motor sintetizado en vivo. La sirena funciona con el motor encendido o apagado. Al apagar, el motor se ahoga y muere antes de callar del todo.</div>
+
+</div>
+
+<script>
+(function(){
+  // ---------------- configuración de motores ----------------
+  const engineConfigs = {
+    v6:  { label:'V6 DEPORTIVO', sub:'V6 · ALTO REGIMEN',  idle:950,  redline:7600,  firingsPerRev:3, firingDiv:13, pitchBase:34, filterBase:280, filterScale:650,  growl:15 },
+    v8:  { label:'V8 CAMARO',    sub:'V8 · TIPO CAMARO',   idle:800,  redline:6800,  firingsPerRev:4, firingDiv:15, pitchBase:38, filterBase:250, filterScale:500,  growl:18 },
+    v12: { label:'V12 F1',       sub:'V12 · FORMULA 1',    idle:4500, redline:15000, firingsPerRev:6, firingDiv:6,  pitchBase:62, filterBase:500, filterScale:1800, growl:9  },
+    ship:{ label:'NAVE ESPACIAL',sub:'REACTOR · FICCIÓN',  idle:1000, redline:9000 }
+  };
+  let currentEngine='v8';
+  let IDLE=engineConfigs.v8.idle, REDLINE=engineConfigs.v8.redline;
+  function isShip(){ return currentEngine==='ship'; }
+
+  // ---------------- estado general ----------------
+  let running=false, stopping=false;
+  let stopStartTime=0, stopStartRpm=0;
+  let ctx, master;
+  let rpm=0, targetRpm=0;
+  const gearTopSpeed=[15,35,60,90,130,999];
+  let currentGear=0;
+  let smoothedSpeed=0, lastSpeed=0, lastTime=performance.now();
+  let manualThrottle=0;
+  let gpsActive=false;
+  let inductionMode='na';
+
+  let revHeld=false, prevRevHeld=false, revBoost=0;
+  let prevBoostAudible=0, lastBlowoff=-10;
+  let startFlareUntil=0;
+
+  let popsEnabled=false, lastPops=-10;
+
+  let sirenMode=0;
+  const sirenModes=['OFF','WAIL','YELP','HI-LO'];
+  let sirenStartTime=0;
+
+  // ---------------- UI refs ----------------
+  const ignitionBtn=document.getElementById('ignitionBtn');
+  const ignitionCaption=document.getElementById('ignitionCaption');
+  const needle=document.getElementById('needle');
+  const rpmNum=document.getElementById('rpmNum');
+  const rpmLabel=document.getElementById('rpmLabel');
+  const gearBadge=document.getElementById('gearBadge');
+  const speedVal=document.getElementById('speedVal');
+  const accelVal=document.getElementById('accelVal');
+  const modeVal=document.getElementById('modeVal');
+  const throttleSlider=document.getElementById('throttle');
+  const throttlePct=document.getElementById('throttlePct');
+  const gpsDot=document.getElementById('gpsDot');
+  const gpsText=document.getElementById('gpsText');
+  const engineSeg=document.getElementById('engineSeg');
+  const engineSub=document.getElementById('engineSub');
+  const inductionSeg=document.getElementById('inductionSeg');
+  const sirenBtn=document.getElementById('sirenBtn');
+  const sirenLabel=document.getElementById('sirenLabel');
+  const sirenSub=document.getElementById('sirenSub');
+  const popsBtn=document.getElementById('popsBtn');
+  const popsSub=document.getElementById('popsSub');
+  const lightbar=document.getElementById('lightbar');
+  const revBtn=document.getElementById('revBtn');
+
+  // ---------------- tacómetro ----------------
+  const ticksGroup=document.getElementById('ticks');
+  const cx=150, cy=150, r1=118, r2=128, startAngle=-220, endAngle=40;
+  for(let i=0;i<=14;i++){
+    const t=i/14; const angle=(startAngle+t*(endAngle-startAngle))*Math.PI/180;
+    const x1=cx+r1*Math.cos(angle), y1=cy+r1*Math.sin(angle);
+    const x2=cx+r2*Math.cos(angle), y2=cy+r2*Math.sin(angle);
+    const el=document.createElementNS('http://www.w3.org/2000/svg','line');
+    el.setAttribute('x1',x1); el.setAttribute('y1',y1); el.setAttribute('x2',x2); el.setAttribute('y2',y2);
+    el.setAttribute('class', t>0.78?'tick hot':'tick');
+    ticksGroup.appendChild(el);
+  }
+  function rpmToAngle(r){ const t=Math.min(1,Math.max(0,r/REDLINE)); return startAngle+t*(endAngle-startAngle); }
+
+  // ---------------- audio ----------------
+  let oscA,oscB,oscC,filter,shaper,rumbleGain,ampLFO,ampLFOGain;
+  let noiseBuf,noiseSrc,noiseFilter,noiseGain;
+  let turboOsc,turboFilter,turboGain;
+  let superOsc,superOsc2,superFilter,superGain;
+  let sirenOsc,sirenFilter,sirenGain;
+  let shipOscA,shipOscB,shipFilter,shipGain,shipNoiseSrc,shipNoiseFilter,shipNoiseGain,shipPulseOsc,shipPulseDepth;
+
+  function makeDistortionCurve(amount){
+    const n=44100, curve=new Float32Array(n);
+    for(let i=0;i<n;i++){ const x=i*2/n-1; curve[i]=(3+amount)*x*20*(Math.PI/180)/(Math.PI+amount*Math.abs(x)); }
+    return curve;
+  }
+  function makeNoiseBuffer(){
+    const bufSize=ctx.sampleRate*2;
+    const buf=ctx.createBuffer(1,bufSize,ctx.sampleRate);
+    const data=buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++) data[i]=Math.random()*2-1;
+    return buf;
+  }
+
+  function buildEngine(){
+    master=ctx.createGain(); master.gain.value=0; master.connect(ctx.destination);
+
+    oscA=ctx.createOscillator(); oscA.type='sawtooth';
+    oscB=ctx.createOscillator(); oscB.type='sawtooth';
+    oscC=ctx.createOscillator(); oscC.type='square';
+    filter=ctx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=300; filter.Q.value=1.2;
+    shaper=ctx.createWaveShaper(); shaper.curve=makeDistortionCurve(engineConfigs.v8.growl); shaper.oversample='2x';
+    rumbleGain=ctx.createGain(); rumbleGain.gain.value=0.35;
+    oscA.connect(filter); oscB.connect(filter); oscC.connect(filter);
+    filter.connect(shaper); shaper.connect(rumbleGain);
+
+    ampLFO=ctx.createOscillator(); ampLFO.type='sine';
+    ampLFOGain=ctx.createGain(); ampLFOGain.gain.value=0.5;
+    const lfoOffset=ctx.createConstantSource(); lfoOffset.offset.value=0.65;
+    ampLFO.connect(ampLFOGain);
+    const firingGain=ctx.createGain();
+    ampLFOGain.connect(firingGain.gain); lfoOffset.connect(firingGain.gain);
+    rumbleGain.connect(firingGain); firingGain.connect(master);
+
+    noiseBuf=makeNoiseBuffer();
+    noiseSrc=ctx.createBufferSource(); noiseSrc.buffer=noiseBuf; noiseSrc.loop=true;
+    noiseFilter=ctx.createBiquadFilter(); noiseFilter.type='bandpass'; noiseFilter.frequency.value=180; noiseFilter.Q.value=0.8;
+    noiseGain=ctx.createGain(); noiseGain.gain.value=0.12;
+    noiseSrc.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(master);
+
+    // turbo -- silbido deportivo
+    turboOsc=ctx.createOscillator(); turboOsc.type='sine'; turboOsc.frequency.value=600;
+    turboFilter=ctx.createBiquadFilter(); turboFilter.type='bandpass'; turboFilter.frequency.value=1400; turboFilter.Q.value=6;
+    turboGain=ctx.createGain(); turboGain.gain.value=0;
+    turboOsc.connect(turboFilter); turboFilter.connect(turboGain); turboGain.connect(master);
+
+    // supercargador -- silbido tipo blower
+    superOsc=ctx.createOscillator(); superOsc.type='sawtooth'; superOsc.frequency.value=300;
+    superOsc2=ctx.createOscillator(); superOsc2.type='sawtooth'; superOsc2.frequency.value=450;
+    superFilter=ctx.createBiquadFilter(); superFilter.type='bandpass'; superFilter.frequency.value=900; superFilter.Q.value=5;
+    superGain=ctx.createGain(); superGain.gain.value=0;
+    superOsc.connect(superFilter); superOsc2.connect(superFilter); superFilter.connect(superGain); superGain.connect(master);
+
+    // sirena -- bus INDEPENDIENTE (funciona con el motor apagado)
+    sirenOsc=ctx.createOscillator(); sirenOsc.type='sawtooth'; sirenOsc.frequency.value=700;
+    sirenFilter=ctx.createBiquadFilter(); sirenFilter.type='bandpass'; sirenFilter.frequency.value=1100; sirenFilter.Q.value=2.2;
+    sirenGain=ctx.createGain(); sirenGain.gain.value=0;
+    sirenOsc.connect(sirenFilter); sirenFilter.connect(sirenGain); sirenGain.connect(ctx.destination);
+
+    // nave espacial
+    shipOscA=ctx.createOscillator(); shipOscA.type='sine'; shipOscA.frequency.value=60;
+    shipOscB=ctx.createOscillator(); shipOscB.type='sine'; shipOscB.frequency.value=63;
+    shipFilter=ctx.createBiquadFilter(); shipFilter.type='lowpass'; shipFilter.frequency.value=400;
+    shipGain=ctx.createGain(); shipGain.gain.value=0;
+    shipOscA.connect(shipFilter); shipOscB.connect(shipFilter); shipFilter.connect(shipGain); shipGain.connect(master);
+    shipNoiseSrc=ctx.createBufferSource(); shipNoiseSrc.buffer=noiseBuf; shipNoiseSrc.loop=true;
+    shipNoiseFilter=ctx.createBiquadFilter(); shipNoiseFilter.type='highpass'; shipNoiseFilter.frequency.value=3000;
+    shipNoiseGain=ctx.createGain(); shipNoiseGain.gain.value=0;
+    shipNoiseSrc.connect(shipNoiseFilter); shipNoiseFilter.connect(shipNoiseGain); shipNoiseGain.connect(master);
+    shipPulseOsc=ctx.createOscillator(); shipPulseOsc.type='sine'; shipPulseOsc.frequency.value=1.2;
+    shipPulseDepth=ctx.createGain(); shipPulseDepth.gain.value=0.12;
+    shipPulseOsc.connect(shipPulseDepth); shipPulseDepth.connect(shipGain.gain);
+
+    [oscA,oscB,oscC,ampLFO,lfoOffset,noiseSrc,turboOsc,superOsc,superOsc2,sirenOsc,shipOscA,shipOscB,shipNoiseSrc,shipPulseOsc].forEach(n=>n.start());
+  }
+
+  async function ensureAudio(){
+    if(!ctx){ ctx=new (window.AudioContext||window.webkitAudioContext)(); buildEngine(); }
+    if(ctx.state==='suspended') await ctx.resume();
+  }
+
+  function updateCarAudio(){
+    const cfg=engineConfigs[currentEngine];
+    const revFactor=rpm/IDLE;
+    const now=ctx.currentTime;
+    oscA.frequency.setTargetAtTime(cfg.pitchBase*revFactor, now, 0.05);
+    oscB.frequency.setTargetAtTime(cfg.pitchBase*revFactor*1.005, now, 0.05);
+    oscC.frequency.setTargetAtTime(cfg.pitchBase*0.5*revFactor, now, 0.05);
+    filter.frequency.setTargetAtTime(cfg.filterBase+revFactor*cfg.filterScale, now, 0.08);
+    noiseFilter.frequency.setTargetAtTime(150+revFactor*400, now, 0.08);
+    noiseGain.gain.setTargetAtTime(0.08+Math.min(0.18,(revFactor-1)*0.05), now, 0.1);
+    const firingHz=(rpm/60)*cfg.firingsPerRev/cfg.firingDiv;
+    ampLFO.frequency.setTargetAtTime(Math.max(1.5,firingHz), now, 0.05);
+    const loud=0.28+Math.min(0.5,(revFactor-1)*0.22);
+    rumbleGain.gain.setTargetAtTime(loud, now, 0.08);
+
+    shipGain.gain.setTargetAtTime(0, now, 0.1);
+    shipNoiseGain.gain.setTargetAtTime(0, now, 0.1);
+
+    const throttlePositive=Math.max(0,(targetRpm-IDLE)/(REDLINE-IDLE));
+    const boostAudible=Math.min(1, throttlePositive*1.3);
+
+    if(inductionMode==='turbo'){
+      turboOsc.frequency.setTargetAtTime(600+revFactor*700, now, 0.05);
+      turboFilter.frequency.setTargetAtTime(1400+revFactor*1200, now, 0.07);
+      turboGain.gain.setTargetAtTime(boostAudible*0.22, now, 0.1);
+      superGain.gain.setTargetAtTime(0, now, 0.1);
+      const nowSec=performance.now()/1000;
+      if(prevBoostAudible-boostAudible>0.35 && prevBoostAudible>0.45 && (nowSec-lastBlowoff)>0.9){ playBlowoff(); lastBlowoff=nowSec; }
+    } else if(inductionMode==='super'){
+      const sf=250+rpm*0.18;
+      superOsc.frequency.setTargetAtTime(sf, now, 0.05);
+      superOsc2.frequency.setTargetAtTime(sf*1.5, now, 0.05);
+      superFilter.frequency.setTargetAtTime(900+rpm*0.25, now, 0.06);
+      superGain.gain.setTargetAtTime(0.08+revFactor*0.07, now, 0.08);
+      turboGain.gain.setTargetAtTime(0, now, 0.1);
+    } else {
+      turboGain.gain.setTargetAtTime(0, now, 0.1);
+      superGain.gain.setTargetAtTime(0, now, 0.1);
+    }
+    prevBoostAudible=boostAudible;
+  }
+
+  function updateShipAudio(){
+    const now=ctx.currentTime;
+    const revFactor=Math.max(0,Math.min(1,(rpm-IDLE)/(REDLINE-IDLE)));
+    shipOscA.frequency.setTargetAtTime(60+revFactor*40, now, 0.15);
+    shipOscB.frequency.setTargetAtTime(63+revFactor*46, now, 0.15);
+    shipFilter.frequency.setTargetAtTime(300+revFactor*1800, now, 0.2);
+    shipGain.gain.setTargetAtTime(0.22+revFactor*0.25, now, 0.15);
+    shipNoiseGain.gain.setTargetAtTime(0.02+revFactor*0.16, now, 0.15);
+    shipPulseOsc.frequency.setTargetAtTime(1.2+revFactor*6, now, 0.2);
+    rumbleGain.gain.setTargetAtTime(0, now, 0.1);
+    noiseGain.gain.setTargetAtTime(0, now, 0.1);
+    turboGain.gain.setTargetAtTime(0, now, 0.1);
+    superGain.gain.setTargetAtTime(0, now, 0.1);
+  }
+
+  function playBlowoff(){
+    const now=ctx.currentTime;
+    const src=ctx.createBufferSource(); src.buffer=noiseBuf;
+    const f=ctx.createBiquadFilter(); f.type='highpass'; f.frequency.setValueAtTime(2200, now); f.frequency.exponentialRampToValueAtTime(600, now+0.35);
+    const g=ctx.createGain(); g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(0.35, now+0.03); g.gain.exponentialRampToValueAtTime(0.001, now+0.4);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(now); src.stop(now+0.42);
+  }
+
+  function playPops(){
+    const now=ctx.currentTime;
+    const count=1+Math.floor(Math.random()*3);
+    let t=now;
+    for(let i=0;i<count;i++){
+      t+=0.03+Math.random()*0.12;
+      const src=ctx.createBufferSource(); src.buffer=noiseBuf;
+      const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=160+Math.random()*80; f.Q.value=3.5;
+      const g=ctx.createGain();
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.32+Math.random()*0.15, t+0.012); g.gain.exponentialRampToValueAtTime(0.001, t+0.09+Math.random()*0.06);
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(t); src.stop(t+0.16);
+    }
+  }
+
+  function playIgnitionSound(){
+    const now=ctx.currentTime;
+    for(let i=0;i<4;i++){
+      const t=now+i*0.16;
+      const g=ctx.createGain();
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.5,t+0.02); g.gain.linearRampToValueAtTime(0,t+0.12);
+      const src=ctx.createBufferSource(); src.buffer=noiseBuf;
+      const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=220-i*20; f.Q.value=3;
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(t); src.stop(t+0.13);
+    }
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(0, now);
+    master.gain.setValueAtTime(0, now+0.62);
+    master.gain.linearRampToValueAtTime(0.9, now+0.85);
+  }
+
+  function playShutdown(){
+    const now=ctx.currentTime;
+    const startGain=master.gain.value;
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(startGain, now);
+    master.gain.linearRampToValueAtTime(startGain*0.35, now+0.12);
+    master.gain.linearRampToValueAtTime(startGain*0.7, now+0.24);
+    master.gain.linearRampToValueAtTime(startGain*0.12, now+0.45);
+    master.gain.linearRampToValueAtTime(startGain*0.4, now+0.62);
+    master.gain.linearRampToValueAtTime(0.03, now+1.15);
+    master.gain.linearRampToValueAtTime(0, now+1.6);
+
+    if(!isShip()){
+      [oscA,oscB,oscC].forEach(o=>{
+        const cur=o.frequency.value;
+        o.frequency.cancelScheduledValues(now);
+        o.frequency.setValueAtTime(cur, now);
+        o.frequency.exponentialRampToValueAtTime(Math.max(5,cur*0.3), now+1.5);
+      });
+      ampLFO.frequency.cancelScheduledValues(now);
+      ampLFO.frequency.setValueAtTime(ampLFO.frequency.value, now);
+      ampLFO.frequency.exponentialRampToValueAtTime(1, now+1.4);
+      [0.14,0.4,0.68].forEach(dtOff=>{
+        const t=now+dtOff;
+        const src=ctx.createBufferSource(); src.buffer=noiseBuf;
+        const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=130+Math.random()*40; f.Q.value=2.2;
+        const g=ctx.createGain();
+        g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.38,t+0.03); g.gain.linearRampToValueAtTime(0,t+0.2);
+        src.connect(f); f.connect(g); g.connect(master);
+        src.start(t); src.stop(t+0.22);
+      });
+    } else {
+      [shipOscA,shipOscB].forEach(o=>{
+        const cur=o.frequency.value;
+        o.frequency.cancelScheduledValues(now);
+        o.frequency.setValueAtTime(cur, now);
+        o.frequency.exponentialRampToValueAtTime(Math.max(8,cur*0.25), now+1.5);
+      });
+    }
+  }
+
+  // ---------------- marchas / rpm ----------------
+  function computeGear(speedKmh){ for(let i=0;i<gearTopSpeed.length;i++){ if(speedKmh<=gearTopSpeed[i]) return i; } return gearTopSpeed.length-1; }
+  function rpmFromSpeedAndGear(speedKmh, gear){
+    const base=IDLE, span=REDLINE-IDLE;
+    const gearFloor=gear===0?0:gearTopSpeed[gear-1];
+    const gearCeil=gearTopSpeed[gear];
+    const t=Math.max(0,Math.min(1,(speedKmh-gearFloor)/(gearCeil-gearFloor||1)));
+    return base+span*t*0.75;
+  }
+
+  // ---------------- loop principal ----------------
+  function frame(){
+    requestAnimationFrame(frame);
+
+    if(stopping){ handleStopping(); return; }
+    if(!running) return;
+
+    const now=performance.now();
+    const dt=Math.max(0.001,(now-lastTime)/1000);
+    lastTime=now;
+
+    let speedKmh, accel;
+    if(gpsActive){
+      speedKmh=smoothedSpeed; accel=(smoothedSpeed-lastSpeed)/dt; lastSpeed=smoothedSpeed;
+      modeVal.textContent='GPS';
+    } else {
+      const targetSpeed=manualThrottle*1.5;
+      smoothedSpeed += (targetSpeed-smoothedSpeed)*Math.min(1,dt*1.4);
+      speedKmh=smoothedSpeed; accel=(smoothedSpeed-lastSpeed)/dt; lastSpeed=smoothedSpeed;
+      modeVal.textContent='MANUAL';
+    }
+
+    currentGear=computeGear(speedKmh);
+    let baseRpm=rpmFromSpeedAndGear(speedKmh, currentGear);
+    const throttlePush=Math.max(0, accel)*90;
+
+    if(revHeld){ revBoost += ((REDLINE-IDLE)*0.92-revBoost)*Math.min(1,dt*2.6); }
+    else { revBoost *= Math.pow(0.02, dt); }
+
+    const nowSec=now/1000;
+    let flareBoost=0;
+    if(nowSec<startFlareUntil){
+      const remain=(startFlareUntil-nowSec)/1.3;
+      flareBoost=(REDLINE-IDLE)*0.55*Math.max(0,remain);
+    }
+
+    targetRpm=Math.max(IDLE, Math.min(REDLINE, baseRpm+throttlePush+revBoost+flareBoost));
+    rpm += (targetRpm-rpm)*Math.min(1,dt*3.2);
+
+    needle.style.transform=`rotate(${rpmToAngle(rpm)-(-90)}deg)`;
+    if(isShip()){
+      const pct=Math.round(Math.max(0,Math.min(1,(rpm-IDLE)/(REDLINE-IDLE)))*100);
+      rpmNum.textContent=pct+'%';
+      gearBadge.textContent='—';
+    } else {
+      rpmNum.textContent=(rpm/1000).toFixed(1);
+      gearBadge.textContent=currentGear===0?'N':currentGear;
+    }
+    speedVal.innerHTML=Math.round(speedKmh)+' <span style="font-size:11px;color:var(--steel)">km/h</span>';
+    accelVal.textContent=accel.toFixed(1);
+
+    if(popsEnabled && !isShip()){
+      if(accel<-2.2 && rpm>IDLE*1.2 && (nowSec-lastPops)>0.55){ playPops(); lastPops=nowSec; }
+      if(prevRevHeld && !revHeld && revBoost>(REDLINE-IDLE)*0.25 && (nowSec-lastPops)>0.4){ playPops(); lastPops=nowSec; }
+    }
+    prevRevHeld=revHeld;
+
+    if(isShip()) updateShipAudio(); else updateCarAudio();
+    updateSiren();
+  }
+  function handleStopping(){
+    const nowSec=performance.now()/1000;
+    const elapsed=nowSec-stopStartTime, dur=1.6;
+    if(elapsed>=dur){
+      stopping=false;
+      rpm=0;
+      needle.style.transform=`rotate(${rpmToAngle(0)-(-90)}deg)`;
+      rpmNum.textContent=isShip()?'0%':'0.0';
+      gearBadge.textContent=isShip()?'—':'N';
+      return;
+    }
+    const decay=Math.max(0, 1-elapsed/dur);
+    const jitter=(Math.random()-0.5)*IDLE*0.15*decay;
+    rpm=Math.max(0, stopStartRpm*decay+jitter);
+    needle.style.transform=`rotate(${rpmToAngle(rpm)-(-90)}deg)`;
+    rpmNum.textContent=isShip()? Math.round(Math.max(0,(rpm-IDLE)/(REDLINE-IDLE))*100)+'%' : (rpm/1000).toFixed(1);
+  }
+  requestAnimationFrame(frame);
+  needle.style.transform=`rotate(${rpmToAngle(0)-(-90)}deg)`;
+
+  // ---------------- sirena (independiente del motor) ----------------
+  function updateSiren(){
+    if(!ctx) return;
+    if(sirenMode===0){ sirenGain.gain.setTargetAtTime(0, ctx.currentTime, 0.15); return; }
+    const t=performance.now()/1000-sirenStartTime;
+    let freq;
+    if(sirenMode===1){ freq=850+Math.sin(t*(2*Math.PI/3.2))*380; }
+    else if(sirenMode===2){ freq=850+Math.sin(t*(2*Math.PI/0.7))*380; }
+    else { freq=(Math.floor(t/0.55)%2===0)?1150:750; }
+    sirenOsc.frequency.setTargetAtTime(freq, ctx.currentTime, sirenMode===3?0.03:0.02);
+    sirenGain.gain.setTargetAtTime(0.22, ctx.currentTime, 0.2);
+  }
+  // loop de sirena independiente del motor (por si el motor está apagado y el frame() principal igual corre, ya cubierto arriba)
+
+  sirenBtn.addEventListener('click', async ()=>{
+    await ensureAudio();
+    sirenMode=(sirenMode+1)%4;
+    sirenStartTime=performance.now()/1000;
+    sirenLabel.textContent=sirenMode===0?'SIRENA':'SIRENA · '+sirenModes[sirenMode];
+    sirenSub.textContent=sirenMode===0?'TOCAR PARA ACTIVAR':'TOCAR PARA CAMBIAR';
+    sirenBtn.classList.toggle('on', sirenMode!==0);
+    lightbar.classList.toggle('active', sirenMode!==0);
+  });
+
+  popsBtn.addEventListener('click', ()=>{
+    popsEnabled=!popsEnabled;
+    popsBtn.classList.toggle('pops-on', popsEnabled);
+    popsSub.textContent=popsEnabled?'ACTIVADO':'DESACTIVADO';
+  });
+
+  function revOn(){ if(!running) return; revHeld=true; revBtn.classList.add('pressed'); }
+  function revOff(){ revHeld=false; revBtn.classList.remove('pressed'); }
+  revBtn.addEventListener('pointerdown', revOn);
+  revBtn.addEventListener('pointerup', revOff);
+  revBtn.addEventListener('pointerleave', revOff);
+  revBtn.addEventListener('pointercancel', revOff);
+
+  engineSeg.addEventListener('click', (e)=>{
+    const btn=e.target.closest('.seg-btn'); if(!btn) return;
+    currentEngine=btn.dataset.eng;
+    const cfg=engineConfigs[currentEngine];
+    IDLE=cfg.idle; REDLINE=cfg.redline;
+    if(shaper && cfg.growl) shaper.curve=makeDistortionCurve(cfg.growl);
+    rpmLabel.textContent=isShip()?'EMPUJE %':'RPM x1000';
+    engineSub.textContent=cfg.sub;
+    inductionSeg.classList.toggle('disabled', isShip());
+    if(running){ rpm=IDLE; targetRpm=IDLE; }
+    [...engineSeg.children].forEach(c=>c.classList.remove('active','ship'));
+    btn.classList.add('active', currentEngine==='ship'?'ship':'');
+  });
+
+  inductionSeg.addEventListener('click', (e)=>{
+    const btn=e.target.closest('.seg-btn'); if(!btn || isShip()) return;
+    inductionMode=btn.dataset.mode;
+    [...inductionSeg.children].forEach(c=>c.classList.remove('active','turbo','super'));
+    btn.classList.add('active', inductionMode==='turbo'?'turbo':(inductionMode==='super'?'super':''));
+  });
+
+  throttleSlider.addEventListener('input', e=>{ manualThrottle=parseInt(e.target.value,10); throttlePct.textContent=manualThrottle+'%'; });
+
+  function startGPS(){
+    if(!('geolocation' in navigator)){ gpsText.textContent='GPS: no disponible'; return; }
+    navigator.geolocation.watchPosition(pos=>{
+      gpsActive=true; gpsDot.classList.add('live'); gpsText.textContent='GPS: activo';
+      throttleSlider.disabled=true;
+      let mps=pos.coords.speed;
+      if(mps==null||isNaN(mps)) mps=smoothedSpeed/3.6;
+      const kmh=Math.max(0,mps*3.6);
+      smoothedSpeed += (kmh-smoothedSpeed)*0.6;
+    }, err=>{ gpsText.textContent='GPS: permiso denegado (modo manual)'; }, { enableHighAccuracy:true, maximumAge:1000, timeout:8000 });
+  }
+
+  ignitionBtn.addEventListener('click', async ()=>{
+    if(stopping) return;
+    if(running){
+      running=false; stopping=true;
+      stopStartTime=performance.now()/1000; stopStartRpm=rpm;
+      playShutdown();
+      ignitionBtn.classList.remove('on');
+      ignitionCaption.textContent='APAGANDO…';
+      ignitionCaption.classList.remove('on');
+      return;
+    }
+    await ensureAudio();
+    playIgnitionSound();
+    running=true;
+    startFlareUntil=performance.now()/1000+1.3;
+    ignitionBtn.classList.add('on');
+    ignitionCaption.textContent='MOTOR ENCENDIDO';
+    ignitionCaption.classList.add('on');
+    startGPS();
+  });
+
+})();
+</script>
+</body>
+</html>
